@@ -2,12 +2,14 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 
-public class Proxy  
+public class Proxy implements Runnable  
 {
+	
+	static ArrayList<Thread> requestThreads;
 
 	public static void main(String[] args) throws IOException 
 	{
-		Proxy proxy = new Proxy();
+		Proxy proxy = new Proxy(8080);
 		proxy.listen();
 	}
 	
@@ -15,9 +17,9 @@ public class Proxy
 	private ServerSocket browserListener;
 	private volatile boolean running = true;
 	
-	public Proxy() 
+	public Proxy(int port) 
 	{
-		browserPort = 8080;
+		browserPort = port;
 		try {
 			browserListener = new ServerSocket(browserPort);
 		} catch (IOException e) {
@@ -26,23 +28,33 @@ public class Proxy
 		}
 		System.out.println("Waiting for client on port " + browserListener.getLocalPort());
 		running = true;
+		new Thread(this).start();
 	}
 
 	
-	public void listen() {
+	public void listen() throws IOException {
 		while (running)
 		{
 			Socket socket = null;
-			try {
-				socket = browserListener.accept();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
+			socket = browserListener.accept();
 			System.out.println("browser connected");
 			RequestRespond response = new RequestRespond(socket);
-			response.use();
+			Thread thread = new Thread(response);
+			requestThreads.add(thread);
+			
+			thread.start();	
 		}
 	}
+
+
+	@Override
+	public void run() 
+	{
+		// TODO Auto-generated method stub
+		
+	}
+
+
+	
 
 }
