@@ -5,7 +5,8 @@ import java.util.*;
 public class Proxy implements Runnable  
 {
 	
-	static ArrayList<Thread> requestThreads;
+	private static ArrayList<Thread> requestThreads;
+	private static HashMap<String, File> cachedFiles;
 
 	public static void main(String[] args) throws IOException 
 	{
@@ -17,8 +18,20 @@ public class Proxy implements Runnable
 	private ServerSocket browserListener;
 	private volatile boolean running = true;
 	
+	public static File getCachedPage(String url) 
+	{
+		return cachedFiles.get(url);
+	}
+
+	public static void addCachedPage(String url, File file) 
+	{
+		cachedFiles.put(url, file);
+	}
+	
 	public Proxy(int port) 
 	{
+		cachedFiles = new HashMap<>();
+		requestThreads = new ArrayList<>();
 		browserPort = port;
 		try {
 			browserListener = new ServerSocket(browserPort);
@@ -35,13 +48,11 @@ public class Proxy implements Runnable
 	public void listen() throws IOException {
 		while (running)
 		{
-			Socket socket = null;
-			socket = browserListener.accept();
+			Socket socket = browserListener.accept();
 			System.out.println("browser connected");
 			RequestRespond response = new RequestRespond(socket);
 			Thread thread = new Thread(response);
 			requestThreads.add(thread);
-			
 			thread.start();	
 		}
 	}
