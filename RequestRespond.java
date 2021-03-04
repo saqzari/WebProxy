@@ -1,8 +1,6 @@
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.*;
-import java.util.*;
-
 import javax.imageio.ImageIO;
 
 public class RequestRespond implements Runnable 
@@ -23,13 +21,13 @@ public class RequestRespond implements Runnable
 		this.browserSocket = socket;
 		try 
 		{
-			browserSocket.setSoTimeout(2000);
+			browserSocket.setSoTimeout(5000);
 			proxyToClientReader = new BufferedReader(new InputStreamReader(browserSocket.getInputStream()));
 			proxyToClientWriter = new BufferedWriter(new OutputStreamWriter(browserSocket.getOutputStream()));
 			
 		} catch (IOException e) 
 		{
-			System.out.println("Error");
+			System.out.println("Error when initializing thread");
 		}
 		
 	}
@@ -37,263 +35,305 @@ public class RequestRespond implements Runnable
 	@Override
 	public void run() 
 	{
-		String str = null;
-		try {
-			str = proxyToClientReader.readLine();
-		} catch (IOException e) {
+		String stringRead = null;
+		try 
+		{
+			stringRead = proxyToClientReader.readLine();
+		} 
+		catch (IOException e) 
+		{
 			e.printStackTrace();
 		}
-		System.out.println(str);
-		String[] parts = str.split(" ");
+		
+		System.out.println("Received Request: " + stringRead);
+		String[] parts = stringRead.split(" ");
 		String command = parts[0];
 		String url = parts[1];
-
+		
 		
 		if(command.equals("CONNECT"))
 		{
-			try {
-			parts = url.split(":");
-			String address = parts[0];
-			int serverPort = Integer.valueOf(parts[1]);
-			
-			for (int i = 0; i < 5; i++) 
+			try 
 			{
-				proxyToClientReader.readLine();
-			}
-			
-			InetAddress serverAddress;
-			serverAddress = InetAddress.getByName(address);
-			Socket serverSocket = new Socket(serverAddress, serverPort);
-			serverSocket.setSoTimeout(2000);
-			proxyToClientWriter.write(CONNECTION_200);
-			proxyToClientWriter.flush();
-			
-			proxyToServerReader = new BufferedReader(new InputStreamReader(browserSocket.getInputStream()));
-			proxyToServerWriter = new BufferedWriter(new OutputStreamWriter(browserSocket.getOutputStream()));
-			
-			transmission(browserSocket, serverSocket);
-			proxyToClientReader.close();
-			proxyToClientWriter.close();
-			proxyToServerReader.close();
-			proxyToServerWriter.close();
-			
-			} catch (UnknownHostException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (SocketException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+				parts = url.split(":");
+				String address = parts[0];
+				int serverPort = Integer.valueOf(parts[1]);
+				
+				for (int i = 0; i < 5; i++) 
+				{
+					proxyToClientReader.readLine();
+				}
+				
+				InetAddress serverAddress;
+				serverAddress = InetAddress.getByName(address);
+				Socket serverSocket = new Socket(serverAddress, serverPort);
+				serverSocket.setSoTimeout(2000);
+				proxyToClientWriter.write(CONNECTION_200);
+				proxyToClientWriter.flush();
+				
+				proxyToServerReader = new BufferedReader(new InputStreamReader(browserSocket.getInputStream()));
+				proxyToServerWriter = new BufferedWriter(new OutputStreamWriter(browserSocket.getOutputStream()));
+				
+				transmission(browserSocket, serverSocket);
+				closeReadersWriters();
+			} 
+			catch (IOException e) 
+			{
+				System.out.println("Error processing Request " + stringRead);
 			}
 
 		}
 		
 		else
 		{
-			
-			if (!url.substring(0, 4).equals("http")) {
+			if (!url.substring(0, 4).equals("http")) 
+			{
 				url = "http://" + url;
 			}
 			
 			File file;
 			if((file = Proxy.getCachedPage(url)) != null)
 			{
-				System.out.println("Cached Copy found for : " + url + "\n");
-				try {
-					String fileExtension = file.getName().substring(file.getName().lastIndexOf('.'));
-					if (checkIfImage(fileExtension)) {
-						BufferedImage image = ImageIO.read(file);
-						if (image == null) {
-							System.out.println("Image " + file.getName() + " was null");
-							proxyToClientWriter.write(ERROR_404);
-							proxyToClientWriter.flush();
-						} else {
-							proxyToClientWriter.write(OK_200);
-							proxyToClientWriter.flush();
-							ImageIO.write(image, fileExtension.substring(1), browserSocket.getOutputStream());
-						}
-					} else {
-						BufferedReader cachedFileBufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(file)));
-						proxyToClientWriter.write(OK_200);
-						proxyToClientWriter.flush();
-						String line;
-						while ((line = cachedFileBufferedReader.readLine()) != null) {
-							proxyToClientWriter.write(line);
-						}
-						proxyToClientWriter.flush();
-
-						if (cachedFileBufferedReader != null) {
-							cachedFileBufferedReader.close();
-						}
-					}
-					if (proxyToClientWriter != null) {
-						proxyToClientWriter.close();
-					}
-				} catch (IOException e) {
-					System.out.println("Error sending cached file to client");
-				}
+				httpRequestCached(url,file);
 			}
+			
 			else 
 			{
-			
-				try{
-					
-					String [] fileParts = computeFile(url);
-					String fileName  = fileParts[0];
-					String fileExtension = fileParts[1];
-	
-	
-					// Attempt to create File to cache to
-					boolean caching = true;
-					File fileToCache = null;
-					BufferedWriter fileToCacheBW = null;
-					
-					try{
-						// Create File to cache 
-						fileToCache = new File(fileName);
-	
-						if(!fileToCache.exists()){
-							fileToCache.createNewFile();
-						}
-	
-						// Create Buffered output stream to write to cached copy of file
-						fileToCacheBW = new BufferedWriter(new FileWriter(fileToCache));
-					}
-					catch (IOException e){
-						System.out.println("Couldn't cache: " + fileName);
-						caching = false;
-						e.printStackTrace();
-					} catch (NullPointerException e) {
-						System.out.println("NPE opening file");
-					}
-	
-					// Check if file is an image
-					if(checkIfImage(fileExtension)){
-						// Create the URL
-						URL remoteURL = new URL(url);
-						BufferedImage image = ImageIO.read(remoteURL);
-	
-						if(image != null) {
-							// Cache the image to disk
-							ImageIO.write(image, fileExtension.substring(1), fileToCache);
-	
-							// Send response code to client
-							proxyToClientWriter.write(OK_200);
-							proxyToClientWriter.flush();
-	
-							// Send them the image data
-							ImageIO.write(image, fileExtension.substring(1), browserSocket.getOutputStream());
-	
-						// No image received from remote server
-						} else {
-							System.out.println("Sending 404 to client as image wasn't received from server" + fileName);
-							proxyToClientWriter.write(ERROR_404);
-							proxyToClientWriter.flush();
-							return;
-						}
-					} 
-	
-					// File is a text file
-					else {
-										
-						// Create the URL
-						URL remoteURL = new URL(url);
-						// Create a connection to remote server
-						HttpURLConnection proxyToServerCon = (HttpURLConnection)remoteURL.openConnection();
-						proxyToServerCon.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-						proxyToServerCon.setRequestProperty("Content-Language", "en-US");  
-						proxyToServerCon.setUseCaches(false);
-						proxyToServerCon.setDoOutput(true);
-					
-						// Create Buffered Reader from remote Server
-						BufferedReader proxyToServerBR = new BufferedReader(new InputStreamReader(proxyToServerCon.getInputStream()));
-						
-	
-						// Send success code to client
-						String line;
-						proxyToClientWriter.write(OK_200);
-						
-						
-						// Read from input stream between proxy and remote server
-						while((line = proxyToServerBR.readLine()) != null){
-							// Send on data to client
-							proxyToClientWriter.write(line);
-	
-							// Write to our cached copy of the file
-							if(caching){
-								fileToCacheBW.write(line);
-							}
-						}
-						
-						// Ensure all data is sent by this point
-						proxyToClientWriter.flush();
-	
-						// Close Down Resources
-						if(proxyToServerBR != null){
-							proxyToServerBR.close();
-						}
-					}
-					
-					if(caching){
-						// Ensure data written and add to our cached hash maps
-						fileToCacheBW.flush();
-						Proxy.addCachedPage(url, fileToCache);
-					}
-
-					// Close down resources
-					if(fileToCacheBW != null){
-						fileToCacheBW.close();
-					}
-
-	
-					if(proxyToClientWriter != null){
-						proxyToClientWriter.close();
-					}
-				} 
-	
-				catch (Exception e){
-					e.printStackTrace();
-				}
-			
-		  }
+				httpRequestNotCached(url);
+		    }
 	   }
+		
+	}
+	
+	public void httpRequestCached(String url, File file)
+	{
+		System.out.println("Cached Copy found for : " + url);
+		
+		try 
+		{
+			String fileExtension = file.getName().substring(file.getName().lastIndexOf('.'));
+			if (checkIfImage(fileExtension)) 
+			{
+				BufferedImage image = ImageIO.read(file);
+				
+				if (image == null) 
+				{
+					System.out.println("Image " + file.getName() + " was null");
+					proxyToClientWriter.write(ERROR_404);
+					proxyToClientWriter.flush();
+				} 
+				
+				else 
+				{
+					proxyToClientWriter.write(OK_200);
+					proxyToClientWriter.flush();
+					ImageIO.write(image, fileExtension.substring(1), browserSocket.getOutputStream());
+				}
+			} 
+			else 
+			{
+				BufferedReader cachedFileBufferedReader = new BufferedReader(new InputStreamReader(new FileInputStream(file)));
+				proxyToClientWriter.write(OK_200);
+				proxyToClientWriter.flush();
+				String line;
+				
+				while ((line = cachedFileBufferedReader.readLine()) != null) 
+				{
+					proxyToClientWriter.write(line);
+				}
+				
+				proxyToClientWriter.flush();
+
+				if (cachedFileBufferedReader != null) 
+				{
+					cachedFileBufferedReader.close();
+				}
+			}
+			
+			closeReadersWriters();
+			
+		} 
+		
+		catch (IOException e) 
+		{
+			System.out.println("Error sending cached file to client");
+		}
+	}
+	
+	public void httpRequestNotCached(String url)
+	{
+		try
+		{
+			String [] fileParts = computeFile(url);
+			String fileName  = fileParts[0];
+			String fileExtension = fileParts[1];
+
+			boolean caching = true;
+			File fileToCache = null;
+			BufferedWriter fileToCacheWriter = null;
+			
+			try
+			{ 
+				fileToCache = new File(fileName);
+
+				if(!fileToCache.exists())
+				{
+					fileToCache.createNewFile();
+				}
+
+				// Create Buffered output stream to write to cached copy of file
+				fileToCacheWriter = new BufferedWriter(new FileWriter(fileToCache));
+			}
+			catch (IOException e)
+			{
+				System.out.println("Couldn't cache: " + fileName);
+				caching = false;
+				e.printStackTrace();
+			} 
+			catch (NullPointerException e) 
+			{
+				System.out.println("Null pointer exception trying to open file");
+			}
+
+			if(checkIfImage(fileExtension))
+			{
+				BufferedImage image = null;
+				URL remoteURL = new URL(url);
+				HttpURLConnection proxyToServerConnection = (HttpURLConnection)remoteURL.openConnection();
+				proxyToServerConnection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.95 Safari/537.11");
+				proxyToServerConnection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+				proxyToServerConnection.setRequestProperty("Content-Language", "en-US");  
+				proxyToServerConnection.setUseCaches(false);
+				proxyToServerConnection.setDoOutput(true);
+				
+				try
+				{
+					image = ImageIO.read(proxyToServerConnection.getInputStream());
+				}
+				catch (IOException e) 
+				{
+					System.out.println("Sending 404 to client as image wasn't received from server: " + fileName);
+					proxyToClientWriter.write(ERROR_404);
+					proxyToClientWriter.flush();
+					closeReadersWriters();
+					return;
+				}
+				
+				if(image != null) 
+				{
+					// Cache image
+					ImageIO.write(image, fileExtension.substring(1), fileToCache);
+
+					// OK response
+					proxyToClientWriter.write(OK_200);
+					proxyToClientWriter.flush();
+
+					// Send image to browser
+					ImageIO.write(image, fileExtension.substring(1), browserSocket.getOutputStream());
+				} 
+				else 
+				{
+					System.out.println("Sending 404 to client as image wasn't received from server" + fileName);
+					proxyToClientWriter.write(ERROR_404);
+					proxyToClientWriter.flush();
+					return;
+				}
+				
+			}
+			
+			else if (fileExtension.equals(".ico"))
+			{
+				System.out.println("Can't read .ico file in java");
+			}
+			
+			// else is a text file
+			else 
+			{			
+				URL remoteURL = new URL(url);
+				
+				// Create a connection to remote server
+				HttpURLConnection proxyToServerConnection = (HttpURLConnection)remoteURL.openConnection();
+				proxyToServerConnection.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.95 Safari/537.11");
+				proxyToServerConnection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+				proxyToServerConnection.setRequestProperty("Content-Language", "en-US");  
+				proxyToServerConnection.setUseCaches(false);
+				proxyToServerConnection.setDoOutput(true);
+				
+				proxyToServerReader = new BufferedReader(new InputStreamReader(proxyToServerConnection.getInputStream()));
+				proxyToClientWriter.write(OK_200);
+				
+				String line;
+				
+				// Read from input stream between proxy and remote server
+				while((line = proxyToServerReader.readLine()) != null)
+				{
+					// Send on data to client
+					proxyToClientWriter.write(line);
+
+					// Write to our cached copy of the file
+					if(caching)
+					{
+						fileToCacheWriter.write(line);
+					}
+				}
+				
+				// Ensure all data is sent by this point
+				proxyToClientWriter.flush();
+
+				// Close Down Resources
+				if(proxyToServerReader != null)
+				{
+					proxyToServerReader.close();
+				}
+				
+			}
+			
+			if(caching)
+			{
+				// Ensure data written and add to our cached hash maps
+				fileToCacheWriter.flush();
+				Proxy.addCachedPage(url, fileToCache);
+			}
+
+			closeReadersWriters();
+			
+		} 
+		catch (Exception e)
+		{
+			System.out.println("Error handling non cached Http request for " + url);
+		}
+	
 	}
 	
 	public String[] computeFile(String url)
 	{
-		// Compute a logical file name as per schema
-		// This allows the files on stored on disk to resemble that of the URL it was taken from
 		int fileExtensionIndex = url.lastIndexOf(".");
-		String fileExtension;
 
-		// Get the type of file
-		fileExtension = url.substring(fileExtensionIndex, url.length());
+		// Get type of file
+		String fileType = url.substring(fileExtensionIndex, url.length());
 
-		// Get the initial file name
+		// Get file name
 		String fileName = url.substring(0,fileExtensionIndex);
 
+		// Get rid of http://www. 
+		fileName = fileName.substring(fileName.indexOf('.') + 1);
 
-		// Trim off http://www. as no need for it in file name
-		fileName = fileName.substring(fileName.indexOf('.')+1);
-
-		// Remove any illegal characters from file name
+		// Remove any illegal characters 
 		fileName = fileName.replace("/", "__");
 		fileName = fileName.replace('.','_');
 		
-		// Trailing / result in index.html of that directory being fetched
-		if(fileExtension.contains("/")){
-			fileExtension = fileExtension.replace("/", "__");
-			fileExtension = fileExtension.replace('.','_');
-			fileExtension += ".html";
+		if(fileType.contains("/"))
+		{
+			fileType = fileType.replace("/", "__");
+			fileType = fileType.replace('.','_');
+			fileType += ".html";
 		}
 	
-		fileName = fileName + fileExtension;
+		fileName = fileName + fileType;
 		
 		String [] fileParts = new String[2];
 		fileParts[0] = fileName;
-		fileParts[1] = fileExtension;
+		fileParts[1] = fileType;
 		return fileParts;
 		
 	}
@@ -305,10 +345,28 @@ public class RequestRespond implements Runnable
 			return true;
 		}
 		
-		return false;
-		
+		return false;	
 	}
 	
+	public void closeReadersWriters() throws IOException
+	{
+		if(proxyToClientWriter != null)
+		{
+			proxyToClientWriter.close();
+		}
+		if(proxyToClientReader != null)
+		{
+			proxyToClientReader.close();
+		}
+		if(proxyToServerReader != null)
+		{
+			proxyToClientWriter.close();
+		}
+		if(proxyToServerWriter != null)
+		{
+			proxyToClientWriter.close();
+		}
+	}
 	
 	
 	public void transmission(Socket browserSocket, Socket serverSocket) throws IOException
