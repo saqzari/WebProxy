@@ -7,6 +7,10 @@ public class Proxy implements Runnable
 	
 	private static ArrayList<Thread> requestThreads;
 	private static HashMap<String, File> cachedFiles;
+	private static HashMap<String, String> blockedSites;
+	private int browserPortNumber;
+	private ServerSocket browserListener;
+	private volatile boolean running;
 
 	public static void main(String[] args) throws IOException 
 	{
@@ -14,9 +18,17 @@ public class Proxy implements Runnable
 		proxy.listen();
 	}
 	
-	private int browserPort;
-	private ServerSocket browserListener;
-	private volatile boolean running = true;
+	public static boolean isBlockedSite(String url) 
+	{
+		for (String key : blockedSites.keySet()) 
+		{
+			if (url.contains(key)) 
+			{
+				return true;
+			}
+		}
+		return false;
+	}
 	
 	public static File getCachedPage(String url) 
 	{
@@ -28,16 +40,17 @@ public class Proxy implements Runnable
 		cachedFiles.put(url, file);
 	}
 	
-	public Proxy(int port) 
+	public Proxy(int portNumber) 
 	{
+		browserPortNumber = portNumber;
 		cachedFiles = new HashMap<>();
 		requestThreads = new ArrayList<>();
-		browserPort = port;
-		try {
-			browserListener = new ServerSocket(browserPort);
-		} catch (IOException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+		try 
+		{
+			browserListener = new ServerSocket(browserPortNumber);
+		} catch (IOException e) 
+		{
+			System.out.println("Error trying to connect with port " + browserListener.getLocalPort());
 		}
 		System.out.println("Waiting for client on port " + browserListener.getLocalPort());
 		running = true;
@@ -45,11 +58,11 @@ public class Proxy implements Runnable
 	}
 
 	
-	public void listen() throws IOException {
+	public void listen() throws IOException 
+	{
 		while (running)
 		{
 			Socket socket = browserListener.accept();
-			System.out.println("browser connected");
 			RequestRespond response = new RequestRespond(socket);
 			Thread thread = new Thread(response);
 			requestThreads.add(thread);
